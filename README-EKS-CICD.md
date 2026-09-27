@@ -643,7 +643,7 @@ That tells Kubernetes:
 
 ------------------------------------------------------------------------
 
-# 18. Commit everything
+# 18. Commit everything in the repository
 
 From the repository root:
 
