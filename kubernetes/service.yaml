@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: testbook-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: testbook-api
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080

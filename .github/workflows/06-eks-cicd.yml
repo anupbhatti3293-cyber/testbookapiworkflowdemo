@@ -1,0 +1,169 @@
+name: "06 - CI/CD - Build, Push to ECR and Deploy to EKS"
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-north-1
+  AWS_ACCOUNT_ID: "316255801172"
+  ECR_REPOSITORY: mybookapi
+  EKS_CLUSTER_NAME: testbook-cluster
+  K8S_NAMESPACE: default
+  K8S_DEPLOYMENT: testbook-api
+  K8S_CONTAINER: testbook-api
+
+jobs:
+  ci:
+    name: "CI - Test, Build and Push Image"
+    runs-on: ubuntu-latest
+
+    outputs:
+      image_uri: ${{ steps.image.outputs.image_uri }}
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Run tests and build application
+        run: mvn --batch-mode clean verify
+
+      - name: Configure AWS credentials using GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::316255801172:role/GitHubActionsECRRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        id: image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          LATEST_URI="$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+
+          echo "Building $IMAGE_URI"
+          docker build \
+            -t "$IMAGE_URI" \
+            -t "$LATEST_URI" \
+            .
+
+          echo "Pushing immutable commit image..."
+          docker push "$IMAGE_URI"
+
+          echo "Pushing latest image..."
+          docker push "$LATEST_URI"
+
+          echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+
+  cd:
+    name: "CD - Deploy to Amazon EKS"
+    runs-on: ubuntu-latest
+    needs: ci
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials using GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::316255801172:role/GitHubActionsECRRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl for EKS
+        run: |
+          aws eks update-kubeconfig \
+            --region "$AWS_REGION" \
+            --name "$EKS_CLUSTER_NAME"
+
+      - name: Show cluster connection
+        run: |
+          kubectl cluster-info
+          kubectl get nodes
+
+      - name: Create/update Kubernetes Service
+        run: |
+          kubectl apply \
+            -n "$K8S_NAMESPACE" \
+            -f kubernetes/service.yaml
+
+      - name: Deploy first version if Deployment does not exist
+        env:
+          IMAGE_URI: ${{ needs.ci.outputs.image_uri }}
+        run: |
+          set -euo pipefail
+
+          if ! kubectl get deployment "$K8S_DEPLOYMENT" \
+              -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
+
+            echo "First deployment detected."
+
+            sed "s|IMAGE_PLACEHOLDER|$IMAGE_URI|g" \
+              kubernetes/deployment.yaml \
+              | kubectl apply -n "$K8S_NAMESPACE" -f -
+          else
+            echo "Deployment already exists."
+          fi
+
+      - name: Update EKS Deployment to new image
+        env:
+          IMAGE_URI: ${{ needs.ci.outputs.image_uri }}
+        run: |
+          kubectl set image \
+            deployment/"$K8S_DEPLOYMENT" \
+            "$K8S_CONTAINER"="$IMAGE_URI" \
+            -n "$K8S_NAMESPACE"
+
+      - name: Wait for rollout to complete
+        run: |
+          kubectl rollout status \
+            deployment/"$K8S_DEPLOYMENT" \
+            -n "$K8S_NAMESPACE" \
+            --timeout=5m
+
+      - name: Show deployed resources
+        run: |
+          echo "----- PODS -----"
+          kubectl get pods -n "$K8S_NAMESPACE" -o wide
+
+          echo "----- DEPLOYMENT -----"
+          kubectl get deployment "$K8S_DEPLOYMENT" \
+            -n "$K8S_NAMESPACE"
+
+          echo "----- SERVICE -----"
+          kubectl get service testbook-service \
+            -n "$K8S_NAMESPACE"
+
+      - name: Print application URL when available
+        run: |
+          HOSTNAME=$(kubectl get service testbook-service \
+            -n "$K8S_NAMESPACE" \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' || true)
+
+          if [ -n "$HOSTNAME" ]; then
+            echo "Application URL: http://$HOSTNAME"
+          else
+            echo "AWS Load Balancer address is not available yet."
+            echo "Run: kubectl get service testbook-service"
+          fi
