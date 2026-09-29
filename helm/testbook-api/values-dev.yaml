@@ -5,7 +5,7 @@ replicaCount: 1
 environment: dev
 
 image:
-  tag: "dev"
+  tag: "latest"
 
 service:
   type: LoadBalancer
