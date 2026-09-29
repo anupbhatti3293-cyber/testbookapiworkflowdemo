@@ -1,11 +1,11 @@
 # TEST environment
 
-replicaCount: 2
+replicaCount: 3
 
 environment: test
 
 image:
-  tag: "test"
+  tag: "latest"
 
 service:
   type: LoadBalancer
