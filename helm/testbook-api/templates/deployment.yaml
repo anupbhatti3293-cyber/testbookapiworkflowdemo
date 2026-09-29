@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: testbook-api
+
+  labels:
+    app: testbook-api
+    environment: {{ .Values.environment }}
+
+spec:
+
+  # Number of Pods to run.
+  #
+  # DEV  -> 1
+  # TEST -> 2
+  # PROD -> 3
+  replicas: {{ .Values.replicaCount }}
+
+  selector:
+    matchLabels:
+      app: testbook-api
+
+  template:
+
+    metadata:
+      labels:
+        app: testbook-api
+        environment: {{ .Values.environment }}
+
+    spec:
+
+      containers:
+
+        - name: testbook-api
+
+          # Docker image comes from values.yaml.
+          #
+          # Example:
+          # 316255801172.dkr.ecr.eu-north-1.amazonaws.com/mybookapi:abc1234
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+
+          ports:
+
+            - name: http
+
+              # Spring Boot application port
+              containerPort: {{ .Values.container.port }}
+
+              protocol: TCP

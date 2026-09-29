@@ -1,0 +1,13 @@
+apiVersion: v2
+
+name: testbook-api
+
+description: Helm chart for deploying Testbook API to Amazon EKS
+
+type: application
+
+# Version of the Helm chart
+version: 0.1.0
+
+# Human-readable application version
+appVersion: "1.0"

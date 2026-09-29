@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: testbook-api
+
+  labels:
+    app: testbook-api
+    environment: {{ .Values.environment }}
+
+spec:
+
+  # For our demo this is LoadBalancer.
+  type: {{ .Values.service.type }}
+
+  # Find Pods containing this label.
+  selector:
+    app: testbook-api
+
+  ports:
+
+    - name: http
+
+      protocol: TCP
+
+      # Port exposed by the Kubernetes Service
+      port: {{ .Values.service.port }}
+
+      # Forward traffic to the Spring Boot application
+      targetPort: {{ .Values.service.targetPort }}

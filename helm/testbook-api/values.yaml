@@ -1,0 +1,30 @@
+# Number of Testbook API Pods we want Kubernetes to run
+replicaCount: 2
+
+# Docker image information
+image:
+  repository: 316255801172.dkr.ecr.eu-north-1.amazonaws.com/mybookapi
+
+  # GitHub Actions will automatically replace this
+  # with the Git commit/image tag.
+  #
+  # Example:
+  # tag: "a72bc91"
+  tag: "initial"
+
+  pullPolicy: IfNotPresent
+
+# Port on which the Spring Boot application runs
+container:
+  port: 8080
+
+# Kubernetes Service configuration
+service:
+  type: LoadBalancer
+
+  # External service port
+  port: 80
+
+  # Traffic will be forwarded to Spring Boot on port 8080
+  targetPort: 8080
+

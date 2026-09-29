@@ -1,0 +1,11 @@
+# DEV environment
+
+replicaCount: 1
+
+environment: dev
+
+image:
+  tag: "dev"
+
+service:
+  type: LoadBalancer

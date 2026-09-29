@@ -1,0 +1,240 @@
+name: Testbook API - CI/CD with Helm and Amazon EKS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-north-1
+  ECR_REPOSITORY: mybookapi
+  EKS_CLUSTER_NAME: testbook-cluster
+  HELM_RELEASE_NAME: testbook-api
+  HELM_CHART_PATH: helm/testbook-api
+  K8S_NAMESPACE: default
+
+jobs:
+
+  # ============================================================
+  # CI: Build, test, create Docker image, and push it to ECR
+  # ============================================================
+  ci:
+    name: CI - Build, Test and Push Image to ECR
+    runs-on: ubuntu-latest
+
+    outputs:
+      image_tag: ${{ steps.image.outputs.image_tag }}
+      image_repository: ${{ steps.image.outputs.image_repository }}
+
+    steps:
+      # --------------------------------------------------------
+      # 1. Download the source code from GitHub
+      # --------------------------------------------------------
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      # --------------------------------------------------------
+      # 2. Install Java
+      # Change java-version if your project uses another version
+      # --------------------------------------------------------
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      # --------------------------------------------------------
+      # 3. Build the application and run automated tests
+      # --------------------------------------------------------
+      - name: Build and test with Maven
+        run: mvn clean verify
+
+      # --------------------------------------------------------
+      # 4. Get temporary AWS credentials through GitHub OIDC
+      # No permanent AWS access key is stored in GitHub
+      # --------------------------------------------------------
+      - name: Configure AWS credentials using GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::316255801172:role/GitHubActionsECRRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      # --------------------------------------------------------
+      # 5. Login Docker to Amazon ECR
+      # --------------------------------------------------------
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # --------------------------------------------------------
+      # 6. Create a unique image tag from the Git commit
+      # Example:
+      # 316255801172.dkr.ecr.eu-north-1.amazonaws.com/mybookapi:a1b2c3d
+      # --------------------------------------------------------
+      - name: Prepare Docker image details
+        id: image
+        shell: bash
+        run: |
+          IMAGE_TAG="${GITHUB_SHA::7}"
+          IMAGE_REPOSITORY="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}"
+
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "image_repository=$IMAGE_REPOSITORY" >> "$GITHUB_OUTPUT"
+
+          echo "Docker image will be:"
+          echo "$IMAGE_REPOSITORY:$IMAGE_TAG"
+
+      # --------------------------------------------------------
+      # 7. Build the Docker image
+      # --------------------------------------------------------
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t "${{ steps.image.outputs.image_repository }}:${{ steps.image.outputs.image_tag }}" \
+            .
+
+      # --------------------------------------------------------
+      # 8. Push the image to Amazon ECR
+      # --------------------------------------------------------
+      - name: Push Docker image to Amazon ECR
+        run: |
+          docker push \
+            "${{ steps.image.outputs.image_repository }}:${{ steps.image.outputs.image_tag }}"
+
+  # ============================================================
+  # CD: Deploy the new image to EKS using Helm
+  # ============================================================
+  cd:
+    name: CD - Deploy to Amazon EKS using Helm
+    runs-on: ubuntu-latest
+    needs: ci
+
+    steps:
+      # --------------------------------------------------------
+      # 1. Download repository again because the Helm chart
+      #    is stored inside this repository
+      # --------------------------------------------------------
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      # --------------------------------------------------------
+      # 2. Get temporary AWS credentials through OIDC
+      # --------------------------------------------------------
+      - name: Configure AWS credentials using GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::316255801172:role/GitHubActionsECRRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      # --------------------------------------------------------
+      # 3. Configure kubectl so this GitHub runner can talk
+      #    to your EKS cluster
+      # --------------------------------------------------------
+      - name: Configure kubectl for Amazon EKS
+        run: |
+          aws eks update-kubeconfig \
+            --region "$AWS_REGION" \
+            --name "$EKS_CLUSTER_NAME"
+
+      # --------------------------------------------------------
+      # 4. Install Helm on the GitHub runner
+      # --------------------------------------------------------
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      # --------------------------------------------------------
+      # 5. Prove that GitHub Actions can reach the cluster
+      # --------------------------------------------------------
+      - name: Show EKS cluster connection
+        run: |
+          kubectl cluster-info
+          kubectl get nodes
+
+      # --------------------------------------------------------
+      # 6. Validate the Helm chart before deploying it
+      # --------------------------------------------------------
+      - name: Lint Helm chart
+        run: |
+          helm lint "$HELM_CHART_PATH"
+
+      # --------------------------------------------------------
+      # 7. Optional but excellent for a demo:
+      #    show the Kubernetes YAML that Helm generates
+      # --------------------------------------------------------
+      - name: Preview generated Kubernetes manifests
+        run: |
+          helm template "$HELM_RELEASE_NAME" "$HELM_CHART_PATH" \
+            --namespace "$K8S_NAMESPACE" \
+            --set image.repository="${{ needs.ci.outputs.image_repository }}" \
+            --set image.tag="${{ needs.ci.outputs.image_tag }}"
+
+      # --------------------------------------------------------
+      # 8. Deploy with Helm
+      #
+      # --install:
+      #   Install if the Helm release does not already exist.
+      #
+      # upgrade:
+      #   Update the existing release if it already exists.
+      #
+      # --set:
+      #   Override values.yaml with the exact ECR image created
+      #   by this GitHub Actions run.
+      #
+      # --wait:
+      #   Wait for Kubernetes resources to become ready.
+      #
+      # --atomic:
+      #   If the upgrade fails, Helm automatically rolls back
+      #   the failed upgrade.
+      # --------------------------------------------------------
+      - name: Deploy Testbook API with Helm
+        run: |
+          helm upgrade --install "$HELM_RELEASE_NAME" "$HELM_CHART_PATH" \
+            --namespace "$K8S_NAMESPACE" \
+            --set image.repository="${{ needs.ci.outputs.image_repository }}" \
+            --set image.tag="${{ needs.ci.outputs.image_tag }}" \
+            --wait \
+            --atomic \
+            --timeout 5m
+
+      # --------------------------------------------------------
+      # 9. Show what Helm and Kubernetes deployed
+      # --------------------------------------------------------
+      - name: Verify Helm release
+        run: |
+          echo "========== HELM RELEASE =========="
+          helm list --namespace "$K8S_NAMESPACE"
+
+          echo "========== HELM STATUS =========="
+          helm status "$HELM_RELEASE_NAME" \
+            --namespace "$K8S_NAMESPACE"
+
+          echo "========== DEPLOYMENTS =========="
+          kubectl get deployments \
+            --namespace "$K8S_NAMESPACE"
+
+          echo "========== PODS =========="
+          kubectl get pods \
+            --namespace "$K8S_NAMESPACE" \
+            -o wide
+
+          echo "========== SERVICES =========="
+          kubectl get services \
+            --namespace "$K8S_NAMESPACE"
+
+      # --------------------------------------------------------
+      # 10. Verify Kubernetes finished rolling out the Deployment
+      # --------------------------------------------------------
+      - name: Verify application rollout
+        run: |
+          kubectl rollout status \
+            deployment/testbook-api \
+            --namespace "$K8S_NAMESPACE" \
+            --timeout=180s

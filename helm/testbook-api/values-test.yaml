@@ -1,0 +1,11 @@
+# TEST environment
+
+replicaCount: 2
+
+environment: test
+
+image:
+  tag: "test"
+
+service:
+  type: LoadBalancer
