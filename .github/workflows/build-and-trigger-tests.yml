@@ -1,0 +1,64 @@
+name: Build Book API and Trigger Automation Tests
+
+on:
+  push:
+    branches:
+      - main
+
+  # Allows us to run the workflow manually for demo
+  workflow_dispatch:
+
+jobs:
+
+  # ============================================================
+  # JOB 1 - BUILD THE BOOK API
+  # ============================================================
+  build:
+    name: Build Book API
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # Step 1: Get the latest application source code
+      - name: Checkout Book API source code
+        uses: actions/checkout@v4
+
+      # Step 2: Install Java
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      # Step 3: Build application and run unit tests
+      - name: Build Book API
+        run: mvn clean verify
+
+
+  # ============================================================
+  # JOB 2 - TRIGGER AUTOMATION TEST REPOSITORY
+  # ============================================================
+  trigger-automation-tests:
+    name: Trigger API Automation Tests
+    runs-on: ubuntu-latest
+
+    # Only run after application build succeeds
+    needs: build
+
+    steps:
+
+      - name: Trigger Automation Repository
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_REPO_TOKEN }}
+        run: |
+          echo "Application build successful."
+          echo "Triggering automation tests..."
+
+          curl -L \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/kscorpio77/test-bookapi-automation/dispatches \
+            -d '{"event_type":"book-api-build-success"}'
