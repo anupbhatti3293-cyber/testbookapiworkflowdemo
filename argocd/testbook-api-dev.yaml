@@ -1,0 +1,121 @@
+# ============================================================
+# Argo CD Application - Testbook API DEV
+# ============================================================
+#
+# This file tells Argo CD:
+#
+# 1. Which Git repository to monitor
+# 2. Where the Helm chart is located
+# 3. Which values file should be used
+# 4. Which Kubernetes cluster to deploy to
+# 5. Which namespace to deploy into
+# 6. Whether deployment should happen automatically
+#
+# ============================================================
+
+apiVersion: argoproj.io/v1alpha1
+
+kind: Application
+
+
+metadata:
+
+  # Name that will appear in the Argo CD UI
+  name: testbook-api-dev
+
+  # Argo CD Applications normally live in the argocd namespace
+  namespace: argocd
+
+
+spec:
+
+  # Use the default Argo CD project
+  project: default
+
+
+  # ==========================================================
+  # SOURCE
+  # ==========================================================
+  #
+  # This tells Argo CD where the desired configuration
+  # of our application is stored.
+  #
+  # ==========================================================
+
+  source:
+
+    # GitHub repository containing our Helm chart
+    repoURL: https://github.com/kscorpio77/testbookapiworkflowdemo.git
+
+    # Branch that Argo CD should monitor
+    targetRevision: main
+
+    # Location of the Helm chart inside the repository
+    path: helm/testbook-api
+
+
+    # --------------------------------------------------------
+    # HELM CONFIGURATION
+    # --------------------------------------------------------
+    #
+    # Tell Argo CD which Helm values file should be used.
+    #
+    # For DEV we use:
+    #
+    # values-dev.yaml
+    #
+    # --------------------------------------------------------
+
+    helm:
+
+      valueFiles:
+
+        - values-dev.yaml
+
+
+  # ==========================================================
+  # DESTINATION
+  # ==========================================================
+  #
+  # This tells Argo CD where the application should
+  # actually be deployed.
+  #
+  # ==========================================================
+
+  destination:
+
+    # Deploy to the same Kubernetes cluster
+    # where Argo CD is running.
+    server: https://kubernetes.default.svc
+
+    # Deploy Testbook API into the DEV namespace
+    namespace: dev
+
+
+  # ==========================================================
+  # SYNC POLICY
+  # ==========================================================
+  #
+  # This controls what Argo CD should do when Git and
+  # Kubernetes are different.
+  #
+  # ==========================================================
+
+  syncPolicy:
+
+    automated:
+
+      # Delete Kubernetes resources if they are removed
+      # from the Git configuration.
+      prune: true
+
+      # If somebody manually changes Kubernetes,
+      # Argo CD will restore it to match Git.
+      selfHeal: true
+
+
+    syncOptions:
+
+      # Automatically create the dev namespace
+      # if it does not already exist.
+      - CreateNamespace=true

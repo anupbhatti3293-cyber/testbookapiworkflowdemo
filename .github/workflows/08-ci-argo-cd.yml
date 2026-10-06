@@ -1,0 +1,285 @@
+name: Testbook API - CI with Argo CD
+
+# ============================================================
+# WHEN SHOULD THIS WORKFLOW RUN?
+# ============================================================
+# 1. Automatically whenever code is pushed to main.
+# 2. Manually from the GitHub Actions screen.
+#
+# The path-ignore is important because this workflow itself
+# updates values-dev.yaml and commits it back to GitHub.
+# Without this, that commit could start another CI build.
+# ============================================================
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'helm/testbook-api/values-dev.yaml'
+
+  workflow_dispatch:
+
+
+# ============================================================
+# PERMISSIONS
+# ============================================================
+# contents: write
+#   Required because GitHub Actions will update values-dev.yaml
+#   and commit the change back into this repository.
+#
+# id-token: write
+#   Required when using GitHub OIDC to authenticate with AWS.
+# ============================================================
+
+permissions:
+  contents: write
+  id-token: write
+
+
+# ============================================================
+# COMMON ENVIRONMENT VARIABLES
+# ============================================================
+
+env:
+
+  # AWS region containing your ECR repository
+  AWS_REGION: eu-north-1
+
+  # Name of the ECR repository
+  ECR_REPOSITORY: testbook-api
+
+
+jobs:
+
+  build-test-publish:
+
+    runs-on: ubuntu-latest
+
+
+    steps:
+
+      # ======================================================
+      # STEP 1 - CHECKOUT CODE
+      # ======================================================
+      # Download the Testbook API source code onto the
+      # GitHub Actions runner.
+      # ======================================================
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+
+      # ======================================================
+      # STEP 2 - INSTALL JAVA
+      # ======================================================
+      # Testbook API is a Java/Spring Boot application.
+      # Therefore Java must be installed before Maven can
+      # compile and test the application.
+      # ======================================================
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+
+      # ======================================================
+      # STEP 3 - BUILD AND TEST
+      # ======================================================
+      # Maven:
+      #
+      # 1. Cleans previous build files
+      # 2. Compiles the Java application
+      # 3. Runs automated tests
+      # 4. Creates the application JAR
+      #
+      # If tests fail, the workflow stops here.
+      # ======================================================
+
+      - name: Build and test application
+        run: mvn clean verify
+
+
+      # ======================================================
+      # STEP 4 - CONNECT GITHUB ACTIONS TO AWS
+      # ======================================================
+      # GitHub Actions needs permission to push Docker images
+      # into Amazon ECR.
+      #
+      # AWS_ROLE_ARN should be configured as a GitHub Secret.
+      #
+      # Example:
+      #
+      # arn:aws:iam::123456789012:role/GitHubActionsECRRole
+      # ======================================================
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      # ======================================================
+      # STEP 5 - LOGIN TO AMAZON ECR
+      # ======================================================
+      # Authenticate Docker with Amazon ECR.
+      #
+      # The ECR registry address is returned by this step
+      # and used by later steps.
+      # ======================================================
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+
+      # ======================================================
+      # STEP 6 - BUILD DOCKER IMAGE
+      # ======================================================
+      # Build the Docker image using the Dockerfile in the
+      # repository.
+      #
+      # We use the Git commit SHA as the Docker image tag.
+      #
+      # Example:
+      #
+      # testbook-api:7ac91fe...
+      #
+      # This means every build gets a unique image version.
+      # ======================================================
+
+      - name: Build Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        run: |
+          echo "Building Docker image..."
+
+          docker build \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            .
+
+
+      # ======================================================
+      # STEP 7 - PUSH DOCKER IMAGE TO ECR
+      # ======================================================
+      # Push the newly created Docker image into Amazon ECR.
+      #
+      # After this step ECR might contain:
+      #
+      # testbook-api
+      #
+      #   abc123      <- previous version
+      #   def456      <- new version
+      #
+      # Nothing has been deployed to Kubernetes yet.
+      # ======================================================
+
+      - name: Push Docker image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        run: |
+          echo "Pushing Docker image to ECR..."
+
+          docker push \
+            $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+
+      # ======================================================
+      # STEP 8 - UPDATE values-dev.yaml
+      # ======================================================
+      #
+      # THIS IS THE IMPORTANT GITOPS STEP.
+      #
+      # Assume values-dev.yaml currently contains:
+      #
+      # image:
+      #   repository: .../testbook-api
+      #   tag: "abc123"
+      #
+      # GitHub Actions changes it to:
+      #
+      # image:
+      #   repository: .../testbook-api
+      #   tag: "def456"
+      #
+      # Notice that we are NOT deploying anything here.
+      #
+      # We are simply changing Git to say:
+      #
+      # "DEV should now run Docker image def456."
+      #
+      # ======================================================
+
+      - name: Update Docker image tag in values-dev.yaml
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+
+        run: |
+
+          echo "Updating values-dev.yaml..."
+
+          sed -i \
+            "s|^[[:space:]]*tag:.*|  tag: \"$IMAGE_TAG\"|" \
+            helm/testbook-api/values-dev.yaml
+
+          echo "Updated values-dev.yaml:"
+
+          cat helm/testbook-api/values-dev.yaml
+
+
+      # ======================================================
+      # STEP 9 - COMMIT THE CHANGE BACK TO GITHUB
+      # ======================================================
+      #
+      # GitHub Actions now commits the updated values-dev.yaml
+      # back into the repository.
+      #
+      # THIS Git change is what Argo CD detects.
+      #
+      # Argo CD does NOT need GitHub Actions to execute:
+      #
+      # helm upgrade
+      #
+      # or:
+      #
+      # kubectl apply
+      #
+      # Argo CD handles the deployment.
+      # ======================================================
+
+      - name: Commit updated image tag
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+
+        run: |
+
+          git config user.name "github-actions[bot]"
+
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add helm/testbook-api/values-dev.yaml
+
+          # Check whether values-dev.yaml actually changed.
+          # If there is no change, don't create an empty commit.
+
+          if git diff --cached --quiet; then
+
+            echo "No Helm values change to commit."
+
+          else
+
+            git commit \
+              -m "Update DEV image to $IMAGE_TAG [skip ci]"
+
+            git push
+
+          fi
