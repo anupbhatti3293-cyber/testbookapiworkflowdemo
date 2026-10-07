@@ -29,7 +29,7 @@ public class BookController {
     @Autowired
     private BookService bookService;
 
-    // Create or update
+    // Create or update the book
     @PostMapping
     public ResponseEntity<Book> createBook(@RequestBody @jakarta.validation.Valid Book book) {
         Book savedBook = bookService.saveBook(book);
