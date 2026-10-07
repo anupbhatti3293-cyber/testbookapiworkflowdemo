@@ -103,7 +103,7 @@ jobs:
       #
       # Example:
       #
-      # 7ac91fe5d9216c87af3c2b01b8e31c6c123456
+      # 7ac91fe5d9216c87af3c2b01b8a8e31c6c123456
       #
       # For readability we use the first 7 characters:
       #
@@ -132,7 +132,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: arn:aws:iam::316255801172:role/GitHubActionsECRRole
           aws-region: ${{ env.AWS_REGION }}
 
 
