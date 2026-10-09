@@ -1,64 +1,163 @@
-name: Build Book API and Trigger Automation Tests.
+name: Build Book API and Trigger Automation Tests
+
+# ============================================================
+# WHEN SHOULD THIS WORKFLOW RUN?
+# ============================================================
+#
+# 1. Automatically whenever code is pushed to main
+# 2. Manually from the GitHub Actions screen
+# ============================================================
 
 on:
   push:
     branches:
       - main
 
-  # Allows us to run the ci cd workflow manually for demo,
   workflow_dispatch:
+
 
 jobs:
 
-  # ============================================================
-  # JOB 1 - BUILD THE BOOK API
-  # ============================================================
+  # ==========================================================
+  # JOB 1 - BUILD AND TEST THE BOOK API
+  # ==========================================================
+  #
+  # This job checks whether the application itself can
+  # successfully build.
+  # ==========================================================
+
   build:
+
     name: Build Book API
+
+    # GitHub provides a temporary Linux computer
+    # on which the build will run.
     runs-on: ubuntu-latest
 
     steps:
 
-      # Step 1: Get the latest application source code
+      # -------------------------------------------------------
+      # STEP 1 - DOWNLOAD APPLICATION SOURCE CODE
+      # -------------------------------------------------------
+      #
+      # The GitHub runner starts as an empty machine.
+      # Therefore, we first download this repository.
+      # -------------------------------------------------------
+
       - name: Checkout Book API source code
         uses: actions/checkout@v4
 
-      # Step 2: Install Java
-      - name: Set up Java
-        uses: actions/setup-java@v4
+
+      # -------------------------------------------------------
+      # STEP 2 - INSTALL JAVA
+      # -------------------------------------------------------
+      #
+      # Our Book API is a Java application.
+      # Therefore Java must be available on the runner.
+      # -------------------------------------------------------
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
           cache: maven
 
-      # Step 3: Build application and run unit tests
+
+      # -------------------------------------------------------
+      # STEP 3 - BUILD THE APPLICATION
+      # -------------------------------------------------------
+      #
+      # Maven:
+      #
+      # clean  = removes previous build files
+      # verify = compiles, packages and verifies the project
+      #
+      # If this command fails, this job fails.
+      # -------------------------------------------------------
+
       - name: Build Book API
-        run: mvn clean verify
+        run: mvn --batch-mode clean verify
 
 
-  # ============================================================
-  # JOB 2 - TRIGGER AUTOMATION TEST REPOSITORY
-  # ============================================================
+
+  # ==========================================================
+  # JOB 2 - TRIGGER AUTOMATION REPOSITORY
+  # ==========================================================
+  #
+  # This job starts ONLY after the application build succeeds.
+  #
+  # Its responsibility is NOT to run the automation tests.
+  #
+  # Instead, it tells the automation repository:
+  #
+  #     "The application build has succeeded.
+  #      Please start your automation tests."
+  #
+  # ==========================================================
+
   trigger-automation-tests:
+
     name: Trigger API Automation Tests
+
     runs-on: ubuntu-latest
 
-    # Only run after application build succeeds
+
+    # --------------------------------------------------------
+    # IMPORTANT
+    # --------------------------------------------------------
+    #
+    # "needs: build" means:
+    #
+    # Do not start this job until the build job has completed
+    # successfully.
+    #
+    # If the application build fails, automation will NOT
+    # be triggered.
+    # --------------------------------------------------------
+
     needs: build
+
 
     steps:
 
+      # -------------------------------------------------------
+      # STEP 1 - TRIGGER AUTOMATION REPOSITORY
+      # -------------------------------------------------------
+      #
+      # We use curl to call the GitHub API.
+      #
+      # AUTOMATION_REPO_TOKEN gives this workflow permission
+      # to communicate with the automation repository.
+      #
+      # repository_dispatch sends an event called:
+      #
+      #     book-api-build-success
+      #
+      # The automation repository will listen for this event.
+      # -------------------------------------------------------
+
       - name: Trigger Automation Repository
+
         env:
           GH_TOKEN: ${{ secrets.AUTOMATION_REPO_TOKEN }}
-        run: |
-          echo "Application build successful."
-          echo "Triggering automation tests..."
 
-          curl -L \
+        run: |
+
+          echo "=========================================="
+          echo "Book API build successful"
+          echo "=========================================="
+
+          echo ""
+          echo "Triggering automation repository..."
+
+          curl --fail-with-body -L \
             -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             https://api.github.com/repos/kscorpio77/test-bookapi-automation/dispatches \
             -d '{"event_type":"book-api-build-success"}'
+
+          echo ""
+          echo "Automation repository triggered successfully."
