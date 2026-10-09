@@ -5,7 +5,7 @@ on:
     branches:
       - main
 
-  # Allows us to run the ci cd workflow manually for demo
+  # Allows us to run the ci cd workflow manually for demo,
   workflow_dispatch:
 
 jobs:
