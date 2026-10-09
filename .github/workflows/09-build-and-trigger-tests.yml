@@ -1,4 +1,4 @@
-name: Build Book API and Trigger Automation Tests
+name: Build Book API and Trigger Automation Tests.
 
 on:
   push:
