@@ -90,7 +90,7 @@ echo "=============================================="
 
 eksctl delete cluster \
   --name testbook-cluster \
-  --region eu-north-1 \
+  --region ap-southeast-2 \
   --wait
 
 echo ""
@@ -108,7 +108,7 @@ echo ""
 
 echo "Remaining EKS clusters:"
 aws eks list-clusters \
-  --region eu-north-1
+  --region ap-southeast-2
 
 echo ""
 
@@ -120,7 +120,7 @@ echo ""
 echo "Remaining EC2 instances:"
 
 aws ec2 describe-instances \
-  --region eu-north-1 \
+  --region ap-southeast-2 \
   --filters "Name=instance-state-name,Values=pending,running,stopping,stopped" \
   --query "Reservations[].Instances[].{ID:InstanceId,State:State.Name,Type:InstanceType}" \
   --output table
@@ -135,7 +135,7 @@ echo ""
 echo "Remaining Load Balancers:"
 
 aws elbv2 describe-load-balancers \
-  --region eu-north-1 \
+  --region ap-southeast-2 \
   --query "LoadBalancers[].{Name:LoadBalancerName,DNS:DNSName}" \
   --output table
 
