@@ -6,7 +6,7 @@
 # Creates an AWS EKS cluster for the Testbook API demo.
 #
 # Cluster : testbook-cluster
-# Region  : eu-north-1
+# Region  : ap-southeast-2
 # Nodes   : 2
 # Type    : t3.small
 # ============================================================
@@ -14,7 +14,7 @@
 set -e
 
 CLUSTER_NAME="testbook-cluster"
-REGION="eu-north-1"
+REGION="ap-southeast-2"
 NODEGROUP_NAME="demo-workers"
 NODE_TYPE="t3.small"
 NODES=2
